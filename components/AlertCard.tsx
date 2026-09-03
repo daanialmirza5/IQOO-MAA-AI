@@ -8,12 +8,14 @@ interface AlertCardProps {
   alert: HealthAlert;
   onViewMother: () => void;
   onMarkFollowedUp: () => void;
+  onSnooze?: () => void;
 }
 
-export const AlertCard: React.FC<AlertCardProps> = ({
+const AlertCardComponent: React.FC<AlertCardProps> = ({
   alert,
   onViewMother,
   onMarkFollowedUp,
+  onSnooze,
 }) => {
   let badgeBg = COLORS.followupBadge;
   let iconName: keyof typeof Ionicons.glyphMap = 'information-circle';
@@ -57,17 +59,33 @@ export const AlertCard: React.FC<AlertCardProps> = ({
             style={styles.outlineBtn}
             onPress={onViewMother}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={`View ${alert.motherName}'s profile`}
           >
             <Text style={styles.outlineBtnText}>View Mother</Text>
           </TouchableOpacity>
+
+          {onSnooze && (
+            <TouchableOpacity
+              style={styles.iconBtn}
+              onPress={onSnooze}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Snooze this alert for 24 hours"
+            >
+              <Ionicons name="time-outline" size={18} color={COLORS.textSecondary} />
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
             style={styles.filledBtn}
             onPress={onMarkFollowedUp}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={`Mark alert for ${alert.motherName} as resolved`}
           >
             <Ionicons name="checkmark-circle-outline" size={16} color={COLORS.textInverted} style={{ marginRight: 4 }} />
-            <Text style={styles.filledBtnText}>Mark Followed Up</Text>
+            <Text style={styles.filledBtnText}>Resolve</Text>
           </TouchableOpacity>
         </View>
       ) : (
@@ -79,6 +97,8 @@ export const AlertCard: React.FC<AlertCardProps> = ({
     </View>
   );
 };
+
+export const AlertCard = React.memo(AlertCardComponent);
 
 const styles = StyleSheet.create({
   card: {
@@ -131,7 +151,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 15,
     fontWeight: '700',
-    color: COLORS.accentDark,
+    color: COLORS.textPrimary,
     marginBottom: 2,
   },
   description: {
@@ -147,11 +167,13 @@ const styles = StyleSheet.create({
     padding: SPACING.sm + 2,
     borderRadius: RADIUS.md,
     marginBottom: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.primaryBorder,
   },
   actionText: {
     fontSize: 12,
     fontWeight: '700',
-    color: COLORS.primaryDark,
+    color: COLORS.primary,
     flex: 1,
   },
   buttonsRow: {
@@ -167,11 +189,22 @@ const styles = StyleSheet.create({
     borderColor: COLORS.primary,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: COLORS.cardBg,
   },
   outlineBtnText: {
     fontSize: 13,
     fontWeight: '700',
     color: COLORS.primary,
+  },
+  iconBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.cardSecondaryBg,
   },
   filledBtn: {
     flex: 1.3,

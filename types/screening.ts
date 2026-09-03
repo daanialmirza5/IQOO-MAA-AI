@@ -1,6 +1,12 @@
 import { RiskLevel } from './mother';
 
-export type ScreeningType = 'VISUAL_ANEMIA' | 'PREGNANCY_RISK' | 'SYMPTOM_CHECK' | 'COMBINED';
+export type ScreeningType =
+  | 'VISUAL_ANEMIA'
+  | 'REPORT_OCR'
+  | 'VOICE_CHECKIN'
+  | 'PREGNANCY_RISK'
+  | 'SYMPTOM_CHECK'
+  | 'COMBINED';
 
 export interface ScreeningResult {
   id: string;
@@ -20,4 +26,15 @@ export interface ScreeningResult {
   recommendation: string;
   capturedImageUri?: string;
   isPrototypeEngine: boolean;
+  // Report OCR specifics
+  extractedHb?: number;
+  extractedBp?: string;
+  previousHb?: number;
+  hbDelta?: number;
+  hbTrend?: 'STABLE' | 'IMPROVING' | 'DECLINING';
+  // Voice specifics
+  voiceTranscript?: string;
+  extractedSymptoms?: string[];
+  detectedLanguage?: string;
 }
+

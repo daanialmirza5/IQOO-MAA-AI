@@ -1,21 +1,19 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { COLORS, SPACING } from '../constants/theme';
+import { COLORS, SPACING, TYPOGRAPHY } from '../constants/theme';
 
 interface SectionHeaderProps {
   title: string;
   actionText?: string;
-  onAction?: () => void;
   onActionPress?: () => void;
 }
 
 export const SectionHeader: React.FC<SectionHeaderProps> = ({
   title,
   actionText,
-  onAction,
   onActionPress,
 }) => {
-  const handlePress = onAction || onActionPress;
+  const handlePress = onActionPress;
 
   return (
     <View style={styles.container}>
@@ -38,14 +36,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.xs,
   },
   title: {
-    fontSize: 16,
-    fontWeight: '800',
+    ...TYPOGRAPHY.h2,
     color: COLORS.textPrimary,
-    letterSpacing: -0.2,
   },
   actionText: {
-    fontSize: 13,
-    fontWeight: '700',
+    ...TYPOGRAPHY.bodyStrong,
     color: COLORS.primary,
   },
 });

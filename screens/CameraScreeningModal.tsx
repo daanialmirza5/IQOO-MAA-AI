@@ -1,425 +1,285 @@
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Modal,
-  SafeAreaView,
-  ActivityIndicator,
-} from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Image, Platform } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
-import { Mother } from '../types/mother';
 import { ScreeningResult } from '../types/screening';
 import { runVisualAnemiaScreening } from '../services/screening/anemiaScreening';
+import { getImagePixels } from '../services/imaging/getImagePixels';
+import { assessImageQuality, computeAverageColor } from '../services/imaging/imageQuality';
+import { detectEyeRegion } from '../services/imaging/eyeDetection';
+import { ImageQualityAssessment } from '../services/imaging/types';
+import { EyeRegionBox } from '../services/imaging/eyeDetection.types';
 import { PrimaryButton } from '../components/PrimaryButton';
-import { COLORS, RADIUS, SPACING } from '../constants/theme';
+import { MotherPickerField } from '../components/MotherPickerField';
+import { useMothers } from '../hooks/useMothers';
+import { useSelectedMother } from '../hooks/useSelectedMother';
+import { RootScreenProps } from '../navigation/types';
+import { COLORS, RADIUS, SPACING, TYPOGRAPHY } from '../constants/theme';
 
-interface CameraScreeningModalProps {
-  visible: boolean;
-  mothers: Mother[];
-  preSelectedMother?: Mother | null;
-  onClose: () => void;
-  onScreeningComplete: (result: ScreeningResult) => void;
-}
+type Stage = 'setup' | 'detecting' | 'analyzing' | 'quality-failed';
 
-export const CameraScreeningModal: React.FC<CameraScreeningModalProps> = ({
-  visible,
-  mothers,
-  preSelectedMother,
-  onClose,
-  onScreeningComplete,
-}) => {
+export const CameraScreeningModal: React.FC<RootScreenProps<'CameraScreening'>> = ({ navigation, route }) => {
   const [permission, requestPermission] = useCameraPermissions();
-  const [selectedMother, setSelectedMother] = useState<Mother | null>(
-    preSelectedMother || mothers[0] || null
-  );
-  const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4>(1); // Step 1: Position, Step 2: Capture, Step 3: Analyze, Step 4: Result
+  const { mothers } = useMothers();
+  const { selectedMother, selectMother } = useSelectedMother(mothers, route.params?.motherId);
   const [targetType, setTargetType] = useState<'eyelid' | 'nailbed'>('eyelid');
+  const [stage, setStage] = useState<Stage>('setup');
+  const [capturedUri, setCapturedUri] = useState<string | null>(null);
+  const [qualityIssues, setQualityIssues] = useState<string[]>([]);
+  const cameraRef = useRef<CameraView>(null);
 
   useEffect(() => {
-    if (preSelectedMother) {
-      setSelectedMother(preSelectedMother);
-    } else if (mothers.length > 0 && !selectedMother) {
-      setSelectedMother(mothers[0]);
-    }
-  }, [preSelectedMother, mothers]);
+    if (!permission?.granted) requestPermission();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const handleCapture = async () => {
+  const runScreening = async (uri: string) => {
     if (!selectedMother) return;
-
-    setCurrentStep(3); // STEP 3 — Analyze
+    setCapturedUri(uri);
 
     try {
+      // Real eye-landmark detection (web only, see eyeDetection.web.ts) to
+      // auto-crop to the actual detected eye region instead of trusting the
+      // user aligned it perfectly within the guide box. Honestly no-ops
+      // (isAvailable: false) on native and for nail-bed targets.
+      let eyeDetectionNote: string | null = null;
+      let cropRegion: EyeRegionBox | undefined;
+
+      if (targetType === 'eyelid') {
+        setStage('detecting');
+        const detection = await detectEyeRegion(uri);
+        if (detection.isAvailable && detection.found && detection.region) {
+          cropRegion = detection.region;
+          eyeDetectionNote = 'Eye region automatically detected and cropped for analysis.';
+        } else if (detection.isAvailable && !detection.found) {
+          setQualityIssues(['No eye was detected in this photo. Please retake with your eye clearly centered in the frame.']);
+          setStage('quality-failed');
+          return;
+        }
+        // detection.isAvailable === false (native): fall through and use the full frame, honestly unflagged.
+      }
+
+      setStage('analyzing');
+      const pixelBuffer = await getImagePixels(uri, cropRegion);
+      const quality: ImageQualityAssessment = assessImageQuality(pixelBuffer);
+
+      if (!quality.isAcceptable) {
+        setQualityIssues(quality.issues);
+        setStage('quality-failed');
+        return;
+      }
+
+      const roiColor = computeAverageColor(pixelBuffer);
       const res = await runVisualAnemiaScreening({
         motherId: selectedMother.id,
         knownHemoglobin: selectedMother.hemoglobin,
-        hasPallorSymptoms: selectedMother.currentSymptoms?.includes('Dizziness'),
+        hasPallorSymptoms: selectedMother.currentSymptoms?.includes('Fatigue') || selectedMother.currentSymptoms?.includes('Dizziness'),
         gestationalAgeWeeks: selectedMother.gestationalAgeWeeks,
         targetType,
+        rawImagePixels: roiColor,
+        imageQuality: quality,
       });
 
-      const screeningObj: ScreeningResult = {
+      const screening: ScreeningResult = {
         id: `scr-${Date.now()}`,
         motherId: selectedMother.id,
         motherName: selectedMother.name,
         gestationalAgeWeeks: selectedMother.gestationalAgeWeeks,
-        timestamp: new Date().toLocaleString('en-US', {
-          dateStyle: 'short',
-          timeStyle: 'short',
-        }),
+        timestamp: new Date().toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' }),
         type: 'VISUAL_ANEMIA',
         overallRisk: res.riskLevel,
         anemiaRisk: res.riskLevel,
-        anemiaReason: res.finding,
+        anemiaReason: `${res.finding} (EI: ${res.biomarkers.erythemaIndex})`,
         pregnancyRisk: selectedMother.riskLevel,
-        symptomRisk: 'LOW',
-        reasons: [
-          res.finding,
-          ...res.reasons,
-          ...(selectedMother.previousComplications ? [`History: ${selectedMother.previousComplications}`] : []),
-        ],
+        symptomRisk: selectedMother.currentSymptoms && selectedMother.currentSymptoms.length > 0 ? 'MEDIUM' : 'LOW',
+        reasons: eyeDetectionNote ? [res.finding, eyeDetectionNote, ...res.reasons] : [res.finding, ...res.reasons],
         recommendation: res.recommendation,
+        capturedImageUri: uri,
         isPrototypeEngine: true,
       };
 
-      setCurrentStep(4); // STEP 4 — Result
-      onScreeningComplete(screeningObj);
-      setCurrentStep(1); // Reset for next launch
+      navigation.replace('ScreeningResultScreen', { screening });
     } catch (e) {
       console.error('Screening failed:', e);
-      setCurrentStep(1);
+      setQualityIssues(['Something went wrong processing this photo. Please try again.']);
+      setStage('quality-failed');
     }
   };
 
+  const handleCapture = async () => {
+    if (!cameraRef.current) return;
+    try {
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.85 });
+      if (photo?.uri) await runScreening(photo.uri);
+    } catch (e) {
+      console.error('Capture failed:', e);
+    }
+  };
+
+  const handlePickFromGallery = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.85,
+      allowsEditing: Platform.OS !== 'web',
+    });
+    if (!result.canceled && result.assets[0]) {
+      await runScreening(result.assets[0].uri);
+    }
+  };
+
+  const handleWebFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const objectUrl = URL.createObjectURL(file);
+      runScreening(objectUrl);
+    }
+  };
+
+  const handleRetake = () => {
+    setCapturedUri(null);
+    setQualityIssues([]);
+    setStage('setup');
+  };
+
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="fullScreen"
-      onRequestClose={onClose}
-    >
-      <SafeAreaView style={styles.container}>
-        {/* Header Bar */}
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.iconBtn} onPress={onClose}>
-            <Ionicons name="close" size={24} color={COLORS.textInverted} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Visual Anemia Screening</Text>
-          <TouchableOpacity
-            style={styles.modeToggle}
-            onPress={() => setTargetType(targetType === 'eyelid' ? 'nailbed' : 'eyelid')}
-          >
-            <Text style={styles.modeToggleText}>
-              Target: {targetType === 'eyelid' ? 'Inner Eyelid' : 'Nail Bed'}
-            </Text>
-          </TouchableOpacity>
-        </View>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.goBack()} accessibilityLabel="Close">
+          <Ionicons name="close" size={24} color={COLORS.textPrimary} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Vision Screening</Text>
+        <TouchableOpacity
+          style={styles.modeToggle}
+          onPress={() => setTargetType(targetType === 'eyelid' ? 'nailbed' : 'eyelid')}
+          accessibilityLabel={`Switch to ${targetType === 'eyelid' ? 'nail bed' : 'eyelid'} screening`}
+        >
+          <Text style={styles.modeToggleText}>{targetType === 'eyelid' ? 'Eyelid' : 'Nail Bed'}</Text>
+        </TouchableOpacity>
+      </View>
 
-        {/* STEP PROGRESS INDICATOR */}
-        <View style={styles.stepProgressRow}>
-          <View style={[styles.stepPill, currentStep >= 1 && styles.stepPillActive]}>
-            <Text style={styles.stepPillText}>1. Position</Text>
-          </View>
-          <View style={[styles.stepPill, currentStep >= 2 && styles.stepPillActive]}>
-            <Text style={styles.stepPillText}>2. Capture</Text>
-          </View>
-          <View style={[styles.stepPill, currentStep >= 3 && styles.stepPillActive]}>
-            <Text style={styles.stepPillText}>3. Analyze</Text>
-          </View>
-          <View style={[styles.stepPill, currentStep >= 4 && styles.stepPillActive]}>
-            <Text style={styles.stepPillText}>4. Result</Text>
-          </View>
-        </View>
+      <View style={styles.motherSelectorWrap}>
+        <MotherPickerField mothers={mothers} selectedMother={selectedMother} onSelect={selectMother} />
+      </View>
 
-        {/* Selected Mother Bar */}
-        <View style={styles.motherSelectorRow}>
-          <Text style={styles.selectorLabel}>Screening Mother:</Text>
-          <Text style={styles.selectedMotherName}>
-            {selectedMother ? `${selectedMother.name} (${selectedMother.gestationalAgeWeeks}w)` : 'Select Mother'}
-          </Text>
-        </View>
+      <View style={styles.instructionCard}>
+        <Ionicons name="information-circle-outline" size={18} color={COLORS.primary} />
+        <Text style={styles.instructionText}>
+          {targetType === 'eyelid'
+            ? 'Gently pull down the lower eyelid. Position the inner surface within the frame in good, even light.'
+            : 'Place the nail bed flat within the frame in good, even light, without a flash reflection.'}
+        </Text>
+      </View>
 
-        {/* Camera Viewport Area */}
-        <View style={styles.cameraContainer}>
-          {permission && permission.granted ? (
-            <CameraView style={StyleSheet.absoluteFillObject} facing="back">
-              {/* High Contrast Rectangular Framing Guide */}
-              <View style={styles.overlayContainer}>
-                <View style={styles.guideBox}>
-                  <View style={[styles.corner, styles.topLeft]} />
-                  <View style={[styles.corner, styles.topRight]} />
-                  <View style={[styles.corner, styles.bottomLeft]} />
-                  <View style={[styles.corner, styles.bottomRight]} />
-                  <Text style={styles.guideBoxLabel}>
-                    ALIGN {targetType === 'eyelid' ? 'INNER EYELID' : 'NAIL BED'} INSIDE BOX
-                  </Text>
-                </View>
+      <View style={styles.cameraContainer}>
+        {stage === 'detecting' ? (
+          <View style={styles.analyzingOverlay}>
+            <ActivityIndicator size="large" color={COLORS.primary} />
+            <Text style={styles.analyzingText}>Detecting eye region…</Text>
+          </View>
+        ) : stage === 'analyzing' ? (
+          <View style={styles.analyzingOverlay}>
+            <ActivityIndicator size="large" color={COLORS.primary} />
+            <Text style={styles.analyzingText}>Checking image quality and analyzing…</Text>
+          </View>
+        ) : stage === 'quality-failed' ? (
+          <View style={styles.qualityFailedBox}>
+            {capturedUri && <Image source={{ uri: capturedUri }} style={styles.previewThumb} />}
+            <Ionicons name="alert-circle-outline" size={28} color={COLORS.riskHigh} />
+            <Text style={styles.qualityFailedTitle}>Image quality is insufficient</Text>
+            {qualityIssues.map((issue, i) => (
+              <Text key={i} style={styles.qualityFailedIssue}>• {issue}</Text>
+            ))}
+            <PrimaryButton title="Retake Photo" onPress={handleRetake} iconName="camera-outline" variant="primary" style={{ marginTop: SPACING.md, width: '100%' }} />
+          </View>
+        ) : permission?.granted ? (
+          <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back">
+            <View style={styles.overlayContainer}>
+              <View style={styles.guideBox}>
+                <View style={[styles.corner, styles.topLeft]} />
+                <View style={[styles.corner, styles.topRight]} />
+                <View style={[styles.corner, styles.bottomLeft]} />
+                <View style={[styles.corner, styles.bottomRight]} />
               </View>
-            </CameraView>
-          ) : (
-            /* Fallback Simulator View for web/emulator */
-            <View style={styles.fallbackPreview}>
-              <Ionicons name="camera-outline" size={56} color={COLORS.primaryLight} />
-              <Text style={styles.fallbackTitle}>Visual Screening Camera</Text>
-              <Text style={styles.fallbackSub}>
-                Position palpebral conjunctiva inner eyelid inside rectangular guide frame.
-              </Text>
-              {!permission?.granted && (
-                <TouchableOpacity style={styles.permBtn} onPress={requestPermission}>
-                  <Text style={styles.permBtnText}>Grant Camera Permission</Text>
-                </TouchableOpacity>
-              )}
-              <View style={styles.simulatedGuide}>
-                <Text style={styles.simulatedGuideText}>CONJUNCTIVA TARGET REGION</Text>
-              </View>
+              <Text style={styles.guideLabel}>Align {targetType === 'eyelid' ? 'inner eyelid' : 'nail bed'} within the frame</Text>
             </View>
-          )}
-
-          {/* STEP 3 ANALYZING OVERLAY */}
-          {currentStep === 3 && (
-            <View style={styles.analyzingOverlay}>
-              <ActivityIndicator size="large" color={COLORS.primaryLight} />
-              <Text style={styles.analyzingTitle}>Analyzing Visual Indicators...</Text>
-              <Text style={styles.analyzingSub}>
-                Extracting conjunctival RGB color space metrics & vascular opacity score.
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {/* Guidance Instructions & Capture Action */}
-        <View style={styles.instructionsContainer}>
-          <View style={styles.guidanceRow}>
-            <View style={styles.guidanceItem}>
-              <Ionicons name="sunny-outline" size={16} color={COLORS.accent} />
-              <Text style={styles.guidanceText}>Natural / Bright Lighting</Text>
-            </View>
-            <View style={styles.guidanceItem}>
-              <Ionicons name="hand-left-outline" size={16} color={COLORS.primaryLight} />
-              <Text style={styles.guidanceText}>Hold Steady (15-20cm)</Text>
-            </View>
+          </CameraView>
+        ) : (
+          <View style={styles.noPermissionBox}>
+            <Ionicons name="camera-outline" size={40} color={COLORS.textMuted} />
+            <Text style={styles.noPermissionText}>Camera access is needed to capture a real photo for screening.</Text>
+            <PrimaryButton title="Grant Camera Access" onPress={requestPermission} iconName="camera" size="normal" style={{ marginTop: SPACING.md }} />
           </View>
+        )}
+      </View>
 
+      {stage === 'setup' && (
+        <View style={styles.controlsArea}>
           <PrimaryButton
-            title={currentStep === 3 ? 'Analyzing...' : 'Capture & Analyze Pallor'}
+            title={`Capture ${targetType === 'eyelid' ? 'Eyelid' : 'Nail Bed'} Photo`}
             onPress={handleCapture}
             iconName="camera"
-            variant="accent"
+            variant="primary"
             size="large"
-            loading={currentStep === 3}
-            style={styles.captureBtn}
+            disabled={!permission?.granted || !selectedMother}
+            style={{ width: '100%', marginBottom: SPACING.sm }}
           />
+
+          {Platform.OS === 'web' ? (
+            <label style={{ cursor: 'pointer' as const }}>
+              <input type="file" accept="image/*" onChange={handleWebFileUpload} style={{ display: 'none' }} />
+              <View style={styles.uploadBtn}>
+                <Ionicons name="image-outline" size={16} color={COLORS.primary} />
+                <Text style={styles.uploadBtnText}>Upload a Photo Instead</Text>
+              </View>
+            </label>
+          ) : (
+            <TouchableOpacity style={styles.uploadBtn} onPress={handlePickFromGallery} disabled={!selectedMother}>
+              <Ionicons name="image-outline" size={16} color={COLORS.primary} />
+              <Text style={styles.uploadBtnText}>Choose From Gallery Instead</Text>
+            </TouchableOpacity>
+          )}
         </View>
-      </SafeAreaView>
-    </Modal>
+      )}
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#111827',
-  },
+  container: { flex: 1, backgroundColor: COLORS.background },
   header: {
-    height: 52,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: SPACING.lg,
-    backgroundColor: '#1F2937',
+    height: 56, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: SPACING.md, backgroundColor: COLORS.cardBg, borderBottomWidth: 1, borderBottomColor: COLORS.border,
   },
-  iconBtn: {
-    padding: SPACING.xs,
+  iconBtn: { padding: SPACING.xs },
+  headerTitle: { ...TYPOGRAPHY.h2, color: COLORS.textPrimary },
+  modeToggle: { backgroundColor: COLORS.cardSecondaryBg, paddingHorizontal: 10, paddingVertical: 6, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border },
+  modeToggleText: { ...TYPOGRAPHY.caption, fontWeight: '700', color: COLORS.textPrimary },
+  motherSelectorWrap: { paddingHorizontal: SPACING.md, paddingTop: SPACING.md },
+  instructionCard: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: SPACING.sm, backgroundColor: COLORS.primaryLight,
+    marginHorizontal: SPACING.md, padding: SPACING.md, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.primaryBorder,
   },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: COLORS.textInverted,
-  },
-  modeToggle: {
-    backgroundColor: '#374151',
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 4,
-    borderRadius: RADIUS.sm,
-  },
-  modeToggleText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: COLORS.primaryLight,
-  },
-  stepProgressRow: {
-    flexDirection: 'row',
-    backgroundColor: '#1F2937',
-    paddingHorizontal: SPACING.md,
-    paddingBottom: SPACING.xs,
-    gap: 4,
-  },
-  stepPill: {
-    flex: 1,
-    paddingVertical: 4,
-    alignItems: 'center',
-    backgroundColor: '#374151',
-    borderRadius: RADIUS.sm,
-  },
-  stepPillActive: {
-    backgroundColor: COLORS.primary,
-  },
-  stepPillText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: COLORS.textInverted,
-  },
-  motherSelectorRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#111827',
-    paddingVertical: SPACING.xs + 2,
-    borderBottomWidth: 1,
-    borderBottomColor: '#374151',
-  },
-  selectorLabel: {
-    fontSize: 12,
-    color: '#9CA3AF',
-    marginRight: 6,
-  },
-  selectedMotherName: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: COLORS.accentLight,
-  },
-  cameraContainer: {
-    flex: 1,
-    position: 'relative',
-    backgroundColor: '#000000',
-  },
-  overlayContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.3)',
-  },
-  guideBox: {
-    width: 260,
-    height: 170,
-    borderWidth: 2,
-    borderColor: '#34D399',
-    borderRadius: RADIUS.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  guideBoxLabel: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#34D399',
-    letterSpacing: 0.5,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-  },
-  corner: {
-    position: 'absolute',
-    width: 20,
-    height: 20,
-    borderColor: '#34D399',
-  },
-  topLeft: { top: -2, left: -2, borderTopWidth: 4, borderLeftWidth: 4 },
-  topRight: { top: -2, right: -2, borderTopWidth: 4, borderRightWidth: 4 },
-  bottomLeft: { bottom: -2, left: -2, borderBottomWidth: 4, borderLeftWidth: 4 },
-  bottomRight: { bottom: -2, right: -2, borderBottomWidth: 4, borderRightWidth: 4 },
-  fallbackPreview: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: SPACING.xl,
-  },
-  fallbackTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: COLORS.textInverted,
-    marginTop: SPACING.md,
-  },
-  fallbackSub: {
-    fontSize: 12,
-    color: '#9CA3AF',
-    textAlign: 'center',
-    marginTop: 4,
-  },
-  permBtn: {
-    marginTop: SPACING.md,
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.sm,
-    borderRadius: RADIUS.md,
-  },
-  permBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.textInverted,
-  },
-  simulatedGuide: {
-    marginTop: SPACING.lg,
-    width: 240,
-    height: 130,
-    borderWidth: 2,
-    borderColor: COLORS.primary,
-    borderStyle: 'dashed',
-    borderRadius: RADIUS.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  simulatedGuideText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: COLORS.primaryLight,
-    letterSpacing: 1,
-  },
-  analyzingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(15, 23, 42, 0.94)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: SPACING.xl,
-  },
-  analyzingTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: COLORS.textInverted,
-    marginTop: SPACING.lg,
-  },
-  analyzingSub: {
-    fontSize: 13,
-    color: '#9CA3AF',
-    textAlign: 'center',
-    marginTop: SPACING.xs,
-    lineHeight: 18,
-  },
-  instructionsContainer: {
-    backgroundColor: '#1F2937',
-    padding: SPACING.lg,
-    borderTopWidth: 1,
-    borderTopColor: '#374151',
-  },
-  guidanceRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginBottom: SPACING.md,
-  },
-  guidanceItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  guidanceText: {
-    fontSize: 12,
-    color: '#D1D5DB',
-    marginLeft: 6,
-    fontWeight: '600',
-  },
-  captureBtn: {
-    marginTop: 0,
-  },
+  instructionText: { ...TYPOGRAPHY.caption, color: COLORS.primaryDark, flex: 1, lineHeight: 17 },
+  cameraContainer: { flex: 1, margin: SPACING.md, borderRadius: RADIUS.lg, overflow: 'hidden', backgroundColor: '#111827', position: 'relative' },
+  overlayContainer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
+  guideBox: { width: 220, height: 160, borderRadius: RADIUS.md, position: 'relative' },
+  corner: { position: 'absolute', width: 24, height: 24, borderColor: '#FFFFFF' },
+  topLeft: { top: 0, left: 0, borderTopWidth: 3, borderLeftWidth: 3 },
+  topRight: { top: 0, right: 0, borderTopWidth: 3, borderRightWidth: 3 },
+  bottomLeft: { bottom: 0, left: 0, borderBottomWidth: 3, borderLeftWidth: 3 },
+  bottomRight: { bottom: 0, right: 0, borderBottomWidth: 3, borderRightWidth: 3 },
+  guideLabel: { color: '#FFFFFF', fontSize: 12, fontWeight: '700', marginTop: SPACING.md, textAlign: 'center', paddingHorizontal: SPACING.lg },
+  analyzingOverlay: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.cardBg },
+  analyzingText: { ...TYPOGRAPHY.bodyStrong, color: COLORS.textPrimary, marginTop: SPACING.md },
+  qualityFailedBox: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.cardBg, padding: SPACING.xl },
+  previewThumb: { width: 120, height: 90, borderRadius: RADIUS.md, marginBottom: SPACING.md, opacity: 0.6 },
+  qualityFailedTitle: { ...TYPOGRAPHY.h3, color: COLORS.textPrimary, marginTop: SPACING.sm, textAlign: 'center' },
+  qualityFailedIssue: { ...TYPOGRAPHY.body, color: COLORS.textSecondary, marginTop: 6, textAlign: 'center' },
+  noPermissionBox: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.cardBg, padding: SPACING.xl },
+  noPermissionText: { ...TYPOGRAPHY.body, color: COLORS.textSecondary, textAlign: 'center', marginTop: SPACING.sm },
+  controlsArea: { padding: SPACING.md, backgroundColor: COLORS.cardBg, borderTopWidth: 1, borderTopColor: COLORS.border },
+  uploadBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.cardSecondaryBg, paddingVertical: 12, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border, gap: 6 },
+  uploadBtnText: { ...TYPOGRAPHY.bodyStrong, color: COLORS.primary },
 });

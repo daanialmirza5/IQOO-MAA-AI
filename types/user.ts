@@ -7,8 +7,11 @@ export interface AshaWorkerProfile {
   totalMothersAssigned: number;
   followUpsDue: number;
   highRiskCount: number;
+  ancDueCount?: number;
+  stableCount?: number;
   language: 'English' | 'Hindi' | 'Bengali' | 'Marathi';
   notificationsEnabled: boolean;
   offlineModeEnabled?: boolean;
   offlineMode?: boolean;
 }
+

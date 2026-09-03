@@ -39,3 +39,11 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+.rocketride/
+.env
+
+# pitch/demo artifacts (video, slides) — large binaries, not app source
+/demo/
+
+# local AI assistant config — not app source
+/.claude/

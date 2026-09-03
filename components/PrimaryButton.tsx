@@ -8,7 +8,7 @@ import {
   TextStyle,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, RADIUS, SPACING } from '../constants/theme';
+import { COLORS, RADIUS, SPACING, SHADOWS } from '../constants/theme';
 
 interface PrimaryButtonProps {
   title: string;
@@ -36,21 +36,27 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({
   let bgColor = COLORS.primary;
   let textColor = COLORS.textInverted;
   let borderColor = 'transparent';
+  let glow = SHADOWS.glowPrimary;
 
   if (variant === 'secondary') {
     bgColor = COLORS.primaryLight;
     textColor = COLORS.primary;
+    glow = undefined as any;
   } else if (variant === 'accent') {
     bgColor = COLORS.accent;
-    textColor = COLORS.textInverted;
+    textColor = COLORS.onDarkPrimary;
+    glow = SHADOWS.glowAccent;
   } else if (variant === 'outline') {
     bgColor = 'transparent';
     textColor = COLORS.primary;
     borderColor = COLORS.primary;
+    glow = undefined as any;
   } else if (variant === 'danger') {
     bgColor = COLORS.riskHigh;
-    textColor = COLORS.textInverted;
+    textColor = COLORS.onDarkPrimary;
+    glow = undefined as any;
   }
+
 
   const isLarge = size === 'large';
 
@@ -62,6 +68,7 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({
       style={[
         styles.button,
         { backgroundColor: disabled ? COLORS.disabled : bgColor, borderColor },
+        !disabled && glow,
         isLarge && styles.largeButton,
         style,
       ]}
