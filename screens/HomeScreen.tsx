@@ -1,72 +1,109 @@
-import React from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  SafeAreaView,
-  StatusBar,
-} from 'react-native';
+import React, { useMemo } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking, RefreshControl } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { AshaWorkerProfile } from '../types/user';
+import { useFocusEffect } from '@react-navigation/native';
 import { Mother } from '../types/mother';
-import { HealthAlert } from '../types/alert';
 
 import { StatCard } from '../components/StatCard';
-import { MotherCard } from '../components/MotherCard';
-import { SectionHeader } from '../components/SectionHeader';
-import { PrimaryButton } from '../components/PrimaryButton';
+import { RiskBadge } from '../components/RiskBadge';
+import { ListSkeleton } from '../components/SkeletonLoader';
+import { ErrorState } from '../components/ErrorState';
+import { EmptyState } from '../components/EmptyState';
 
-import { COLORS, RADIUS, SPACING, SHADOWS } from '../constants/theme';
+import { useMothers } from '../hooks/useMothers';
+import { useAlerts } from '../hooks/useAlerts';
+import { useUserProfile } from '../hooks/useUserProfile';
+import { useAppNavigation } from '../navigation/useAppNavigation';
 
-interface HomeScreenProps {
-  user: AshaWorkerProfile;
-  mothers: Mother[];
-  alerts: HealthAlert[];
-  onOpenNewMother: () => void;
-  onOpenScreeningTab: () => void;
-  onSelectMother: (mother: Mother) => void;
-  onOpenAlertsTab: () => void;
-  onStartDemoFlow: () => void;
+import { COLORS, RADIUS, SPACING, SHADOWS, TYPOGRAPHY } from '../constants/theme';
+
+/** A mother needs attention if she's HIGH risk, MEDIUM with a declining trend, or follow-up is due. */
+function needsAttention(mother: Mother): boolean {
+  return mother.riskLevel === 'HIGH' || (mother.riskLevel === 'MEDIUM' && mother.hbTrend === 'DECLINING') || !!mother.needsFollowUp;
 }
 
-export const HomeScreen: React.FC<HomeScreenProps> = ({
-  user,
-  mothers,
-  alerts,
-  onOpenNewMother,
-  onOpenScreeningTab,
-  onSelectMother,
-  onOpenAlertsTab,
-  onStartDemoFlow,
-}) => {
-  const highRiskMothers = mothers.filter((m) => m.riskLevel === 'HIGH' || m.dueToday);
+function priorityScore(mother: Mother): number {
+  let score = mother.riskLevel === 'HIGH' ? 100 : mother.riskLevel === 'MEDIUM' ? 50 : 0;
+  if (mother.hbTrend === 'DECLINING') score += 20;
+  if (mother.bpTrend === 'HIGH' || mother.bpTrend === 'ELEVATING') score += 15;
+  if (mother.needsFollowUp) score += 5;
+  return score;
+}
+
+function reasonLine(mother: Mother): string | null {
+  const readings = mother.readings || [];
+  if (readings.length >= 2 && mother.hbTrend === 'DECLINING') {
+    const sorted = [...readings].sort((a, b) => a.week - b.week);
+    const first = sorted.find((r) => r.hemoglobin != null);
+    const last = [...sorted].reverse().find((r) => r.hemoglobin != null);
+    if (first && last && first !== last) {
+      return `Hb ↓ ${first.hemoglobin} → ${last.hemoglobin} g/dL`;
+    }
+  }
+  if (mother.bpTrend === 'HIGH' && mother.bloodPressure) return `BP elevated at ${mother.bloodPressure} mmHg`;
+  if (mother.currentSymptoms && mother.currentSymptoms.length > 0) return `Reported: ${mother.currentSymptoms.join(', ')}`;
+  if (mother.riskReason) return mother.riskReason;
+  return null;
+}
+
+export const HomeScreen: React.FC = () => {
+  const { mothers, isLoading, error, refresh: refreshMothers } = useMothers();
+  const { alerts, refresh: refreshAlerts } = useAlerts();
+  const { profile, refresh: refreshProfile } = useUserProfile();
+  const navigation = useAppNavigation();
+
+  useFocusEffect(
+    React.useCallback(() => {
+      refreshMothers();
+      refreshAlerts();
+      refreshProfile();
+    }, [refreshMothers, refreshAlerts, refreshProfile])
+  );
+
+  const { highRiskCount, followUpCount, ancDueCount, stableCount, attentionList } = useMemo(() => {
+    const high = mothers.filter((m) => m.riskLevel === 'HIGH').length;
+    const followUp = mothers.filter((m) => m.riskLevel === 'MEDIUM' && m.needsFollowUp).length;
+    const ancDue = mothers.filter((m) => m.needsFollowUp && m.riskLevel === 'LOW').length;
+    const stable = mothers.length - high - followUp - ancDue;
+    const attention = mothers
+      .filter(needsAttention)
+      .sort((a, b) => priorityScore(b) - priorityScore(a))
+      .slice(0, 5);
+    return { highRiskCount: high, followUpCount: followUp, ancDueCount: ancDue, stableCount: Math.max(0, stable), attentionList: attention };
+  }, [mothers]);
+
   const activeAlertsCount = alerts.filter((a) => !a.isResolved).length;
 
+  const handleCall = (phone: string) => {
+    Linking.openURL(`tel:${phone.replace(/\s/g, '')}`);
+  };
+
+  if (error) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <ErrorState description={error} onRetry={refreshMothers} />
+      </SafeAreaView>
+    );
+  }
+
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
-
-      {/* Top Branding & Greeting Header */}
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.headerBar}>
-        <View>
-          <View style={styles.appNameRow}>
-            <Text style={styles.appTitle}>MaAI</Text>
-            <View style={styles.prototypePill}>
-              <Text style={styles.prototypePillText}>AI PROTOTYPE</Text>
-            </View>
-          </View>
-          <Text style={styles.greetingSub}>
-            Good morning, {user.name} ({user.assignedArea})
-          </Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.greeting}>{profile ? `Hello, ${profile.name.split(' ')[0]}` : 'Hello'}</Text>
+          <Text style={styles.greetingSub}>{profile?.assignedArea || 'Loading...'}</Text>
         </View>
-
-        <TouchableOpacity style={styles.alertIconBox} onPress={onOpenAlertsTab}>
-          <Ionicons name="notifications-outline" size={24} color={COLORS.primaryDark} />
+        <TouchableOpacity
+          style={styles.alertIconBox}
+          onPress={() => navigation.navigate('Tabs', { screen: 'AlertsTab' } as never)}
+          accessibilityRole="button"
+          accessibilityLabel={`${activeAlertsCount} active alerts`}
+        >
+          <Ionicons name="notifications-outline" size={22} color={COLORS.textPrimary} />
           {activeAlertsCount > 0 && (
             <View style={styles.alertBadge}>
-              <Text style={styles.alertBadgeText}>{activeAlertsCount}</Text>
+              <Text style={styles.alertBadgeText}>{activeAlertsCount > 9 ? '9+' : activeAlertsCount}</Text>
             </View>
           )}
         </TouchableOpacity>
@@ -75,266 +112,175 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={isLoading} onRefresh={() => { refreshMothers(); refreshAlerts(); }} />}
       >
-        {/* PHASE 9: ONE-TAP DEMO HERO CARD */}
-        <View style={styles.demoHeroCard}>
-          <View style={styles.demoHeroHeader}>
-            <View style={styles.sparkleCircle}>
-              <Ionicons name="sparkles" size={22} color={COLORS.textInverted} />
-            </View>
-            <View style={{ flex: 1, marginLeft: SPACING.md }}>
-              <Text style={styles.demoHeroTitle}>START DEMO SCREENING</Text>
-              <Text style={styles.demoHeroSub}>
-                1-Tap Hackathon Flow: Scan & evaluate Priya Sharma (28 Weeks)
-              </Text>
-            </View>
-          </View>
-
-          <PrimaryButton
-            title="Launch Demo Screening Flow"
-            onPress={onStartDemoFlow}
-            iconName="camera"
-            variant="accent"
-            size="large"
-            style={styles.demoHeroBtn}
-          />
-        </View>
-
-        {/* Action Buttons Row */}
-        <View style={styles.actionRow}>
-          <TouchableOpacity
-            style={styles.actionCard}
-            onPress={onOpenNewMother}
-            activeOpacity={0.8}
-          >
-            <View style={styles.actionIconCircle}>
-              <Ionicons name="person-add" size={22} color={COLORS.primary} />
-            </View>
-            <Text style={styles.actionCardTitle}>New Mother</Text>
-            <Text style={styles.actionCardSub}>Register profile</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.actionCard}
-            onPress={onOpenScreeningTab}
-            activeOpacity={0.8}
-          >
-            <View style={[styles.actionIconCircle, { backgroundColor: COLORS.accentLight }]}>
-              <Ionicons name="scan-outline" size={22} color={COLORS.accentDark} />
-            </View>
-            <Text style={styles.actionCardTitle}>Screening Hub</Text>
-            <Text style={styles.actionCardSub}>Camera & Risk check</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Stats Metrics Grid */}
-        <SectionHeader title="Field Activity Summary" />
+        {/* Priority summary strip */}
         <View style={styles.statsRow}>
-          <StatCard
-            label="Total Mothers"
-            value={user.totalMothersAssigned || 24}
-            iconName="people-outline"
-            accentColor={COLORS.primary}
-          />
-          <StatCard
-            label="Follow-ups Due"
-            value={user.followUpsDue || 5}
-            iconName="calendar-outline"
-            accentColor={COLORS.riskMedium}
-          />
-          <StatCard
-            label="High Priority"
-            value={user.highRiskCount || 3}
-            iconName="alert-circle-outline"
-            accentColor={COLORS.riskHigh}
-          />
+          <StatCard label="High Priority" value={highRiskCount} iconName="alert-circle" variant="alert" />
+          <StatCard label="Follow-up" value={followUpCount} iconName="time" variant="warning" />
+          <StatCard label="ANC Due" value={ancDueCount} iconName="calendar-outline" accentColor={COLORS.info} />
+          <StatCard label="Stable" value={stableCount} iconName="checkmark-circle" variant="success" />
         </View>
 
-        {/* TODAY'S PRIORITY CASES */}
-        <SectionHeader
-          title="TODAY'S PRIORITY CASES"
-          actionText="View All Mothers"
-          onActionPress={onOpenScreeningTab}
-        />
+        {/* Quick actions */}
+        <View style={styles.quickActionsRow}>
+          <TouchableOpacity style={styles.quickAction} onPress={() => navigation.navigate('NewMother')} accessibilityRole="button" accessibilityLabel="Register a new mother">
+            <View style={styles.quickActionIcon}>
+              <Ionicons name="person-add-outline" size={18} color={COLORS.primary} />
+            </View>
+            <Text style={styles.quickActionText}>Register Mother</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.quickAction} onPress={() => navigation.navigate('Tabs', { screen: 'ScreenTab' } as never)} accessibilityRole="button" accessibilityLabel="Open screening tools">
+            <View style={styles.quickActionIcon}>
+              <Ionicons name="scan-outline" size={18} color={COLORS.primary} />
+            </View>
+            <Text style={styles.quickActionText}>Start Screening</Text>
+          </TouchableOpacity>
+        </View>
 
-        {highRiskMothers.slice(0, 3).map((mother) => (
-          <MotherCard
-            key={mother.id}
-            mother={mother}
-            onPress={() => onSelectMother(mother)}
+        {/* Needs Your Attention */}
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionHeading}>Needs Your Attention</Text>
+          {mothers.length > 0 && (
+            <TouchableOpacity onPress={() => navigation.navigate('Tabs', { screen: 'MothersTab' } as never)}>
+              <Text style={styles.sectionLink}>View All</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {isLoading ? (
+          <ListSkeleton count={2} />
+        ) : attentionList.length === 0 ? (
+          <EmptyState
+            title="Nothing urgent right now"
+            description="No mothers currently need immediate attention. Great work staying on top of your caseload."
+            iconName="checkmark-done-circle-outline"
           />
-        ))}
+        ) : (
+          attentionList.map((mother) => {
+            const reason = reasonLine(mother);
+            return (
+              <View key={mother.id} style={styles.attentionCard}>
+                <TouchableOpacity onPress={() => navigation.navigate('MotherDetail', { motherId: mother.id })} activeOpacity={0.7}>
+                  <View style={styles.attentionTopRow}>
+                    <RiskBadge level={mother.riskLevel} size="small" />
+                    {mother.hbTrend === 'DECLINING' && (
+                      <View style={styles.trendPill}>
+                        <Ionicons name="trending-down" size={12} color={COLORS.riskHigh} />
+                        <Text style={styles.trendPillText}>Deteriorating</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.attentionName}>{mother.name}</Text>
+                  <Text style={styles.attentionMeta}>{mother.gestationalAgeWeeks} weeks pregnant · {mother.village}</Text>
+                  {reason && (
+                    <View style={styles.reasonRow}>
+                      <Ionicons name="information-circle-outline" size={14} color={COLORS.textSecondary} />
+                      <Text style={styles.reasonText}>{reason}</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
 
-        {/* Trust & Safety Disclaimer Footer */}
+                <View style={styles.actionRow}>
+                  <TouchableOpacity style={styles.actionBtn} onPress={() => handleCall(mother.phone)} accessibilityRole="button" accessibilityLabel={`Call ${mother.name}`}>
+                    <Ionicons name="call-outline" size={15} color={COLORS.primary} />
+                    <Text style={styles.actionBtnText}>Call</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.actionBtn} onPress={() => navigation.navigate('MotherDetail', { motherId: mother.id })} accessibilityRole="button" accessibilityLabel={`View ${mother.name} profile`}>
+                    <Ionicons name="person-outline" size={15} color={COLORS.primary} />
+                    <Text style={styles.actionBtnText}>Visit</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, styles.actionBtnPrimary]}
+                    onPress={() => navigation.navigate('ReferralSummary', { motherId: mother.id })}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Refer ${mother.name} to PHC`}
+                  >
+                    <Ionicons name="share-outline" size={15} color={COLORS.textInverted} />
+                    <Text style={[styles.actionBtnText, { color: COLORS.textInverted }]}>Refer</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })
+        )}
+
         <View style={styles.trustFooter}>
-          <Ionicons name="shield-checkmark-outline" size={18} color={COLORS.textMuted} />
+          <Ionicons name="shield-checkmark-outline" size={16} color={COLORS.textMuted} />
           <Text style={styles.trustFooterText}>
-            MaAI provides decision support for frontline health workers, not a medical diagnosis. Confirm all high-risk findings with laboratory testing.
+            MaAI provides decision support, not a medical diagnosis. Confirm all findings with clinical or laboratory testing.
           </Text>
         </View>
 
-        <View style={{ height: 60 }} />
+        <View style={{ height: 40 }} />
       </ScrollView>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
+  container: { flex: 1, backgroundColor: COLORS.background },
   headerBar: {
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.md,
     backgroundColor: COLORS.cardBg,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
-  appNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  appTitle: {
-    fontSize: 26,
-    fontWeight: '900',
-    color: COLORS.primaryDark,
-    letterSpacing: -0.5,
-  },
-  prototypePill: {
-    backgroundColor: COLORS.primaryLight,
-    paddingHorizontal: SPACING.xs + 2,
-    paddingVertical: 2,
-    borderRadius: RADIUS.sm,
-    marginLeft: 8,
-  },
-  prototypePillText: {
-    fontSize: 9,
-    fontWeight: '800',
-    color: COLORS.primaryDark,
-    letterSpacing: 0.5,
-  },
-  greetingSub: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
-    marginTop: 2,
-  },
+  greeting: { ...TYPOGRAPHY.h1, color: COLORS.textPrimary },
+  greetingSub: { ...TYPOGRAPHY.body, color: COLORS.textSecondary, marginTop: 2 },
   alertIconBox: {
-    position: 'relative',
-    padding: SPACING.xs,
+    width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.cardSecondaryBg,
+    alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: COLORS.border,
   },
   alertBadge: {
-    position: 'absolute',
-    top: 2,
-    right: 2,
-    backgroundColor: COLORS.riskHigh,
-    borderRadius: 8,
-    minWidth: 16,
-    height: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 2,
+    position: 'absolute', top: 4, right: 4, backgroundColor: COLORS.riskHigh, borderRadius: 8,
+    minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3,
   },
-  alertBadgeText: {
-    fontSize: 9,
-    fontWeight: '800',
-    color: COLORS.textInverted,
+  alertBadgeText: { fontSize: 9, fontWeight: '800', color: COLORS.textInverted },
+  scrollContent: { padding: SPACING.lg },
+  statsRow: { flexDirection: 'row', gap: SPACING.xs, marginBottom: SPACING.md },
+  quickActionsRow: { flexDirection: 'row', gap: SPACING.sm, marginBottom: SPACING.xl },
+  quickAction: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.cardBg,
+    borderRadius: RADIUS.lg, padding: SPACING.md, borderWidth: 1, borderColor: COLORS.border, gap: SPACING.sm,
+    ...SHADOWS.small,
   },
-  scrollContent: {
-    padding: SPACING.lg,
+  quickActionIcon: {
+    width: 32, height: 32, borderRadius: 16, backgroundColor: COLORS.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
   },
-  demoHeroCard: {
-    backgroundColor: COLORS.primaryDark,
-    borderRadius: RADIUS.xl,
-    padding: SPACING.lg,
-    marginBottom: SPACING.lg,
-    ...SHADOWS.card,
+  quickActionText: { ...TYPOGRAPHY.bodyStrong, color: COLORS.textPrimary, flexShrink: 1 },
+  sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.sm },
+  sectionHeading: { ...TYPOGRAPHY.h2, color: COLORS.textPrimary },
+  sectionLink: { ...TYPOGRAPHY.bodyStrong, color: COLORS.primary },
+  attentionCard: {
+    backgroundColor: COLORS.cardBg, borderRadius: RADIUS.xl, padding: SPACING.md, marginBottom: SPACING.sm,
+    borderWidth: 1, borderColor: COLORS.border, ...SHADOWS.card,
   },
-  demoHeroHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: SPACING.md,
+  attentionTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: SPACING.xs },
+  trendPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: COLORS.riskHighBg,
+    paddingHorizontal: 8, paddingVertical: 3, borderRadius: RADIUS.full,
   },
-  sparkleCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: COLORS.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
+  trendPillText: { ...TYPOGRAPHY.overline, color: COLORS.riskHigh },
+  attentionName: { ...TYPOGRAPHY.h2, color: COLORS.textPrimary },
+  attentionMeta: { ...TYPOGRAPHY.caption, color: COLORS.textSecondary, marginTop: 2 },
+  reasonRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 4, marginTop: SPACING.sm },
+  reasonText: { ...TYPOGRAPHY.caption, color: COLORS.textSecondary, flex: 1, lineHeight: 16 },
+  actionRow: { flexDirection: 'row', gap: SPACING.xs, marginTop: SPACING.md },
+  actionBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
+    height: 40, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.cardSecondaryBg,
   },
-  demoHeroTitle: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: COLORS.textInverted,
-    letterSpacing: 0.5,
-  },
-  demoHeroSub: {
-    fontSize: 12,
-    color: COLORS.primaryLight,
-    marginTop: 2,
-    lineHeight: 16,
-  },
-  demoHeroBtn: {
-    marginTop: SPACING.xs,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    gap: SPACING.md,
-    marginBottom: SPACING.lg,
-  },
-  actionCard: {
-    flex: 1,
-    backgroundColor: COLORS.cardBg,
-    borderRadius: RADIUS.lg,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    ...SHADOWS.card,
-  },
-  actionIconCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.primaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: SPACING.sm,
-  },
-  actionCardTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: COLORS.textPrimary,
-  },
-  actionCardSub: {
-    fontSize: 11,
-    color: COLORS.textSecondary,
-    marginTop: 2,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: SPACING.sm,
-    marginBottom: SPACING.lg,
-  },
+  actionBtnPrimary: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  actionBtnText: { ...TYPOGRAPHY.caption, fontWeight: '700', color: COLORS.primary },
   trustFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.cardSecondaryBg,
-    borderRadius: RADIUS.md,
-    padding: SPACING.md,
-    marginTop: SPACING.lg,
-    borderWidth: 1,
-    borderColor: COLORS.divider,
+    flexDirection: 'row', alignItems: 'flex-start', backgroundColor: COLORS.cardSecondaryBg, borderRadius: RADIUS.md,
+    padding: SPACING.md, marginTop: SPACING.md, gap: SPACING.sm,
   },
-  trustFooterText: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginLeft: SPACING.sm,
-    flex: 1,
-    lineHeight: 16,
-  },
+  trustFooterText: { ...TYPOGRAPHY.caption, color: COLORS.textMuted, flex: 1, lineHeight: 16 },
 });

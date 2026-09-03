@@ -2,27 +2,32 @@
   "expo": {
     "name": "MaAI",
     "slug": "maai",
+    "scheme": "maai",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#FBF9F5"
-    },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.maai.maternalhealth",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Allow MaAI to access camera for non-invasive visual screening and document OCR.",
+        "NSMicrophoneUsageDescription": "Allow MaAI to record audio for vernacular maternal symptom check-ins.",
+        "NSPhotoLibraryUsageDescription": "Allow MaAI to select a photo of the eyelid, nail bed, or lab report from your gallery when the camera isn't available."
+      }
     },
     "android": {
       "package": "com.maai.maternalhealth",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#FBF9F5"
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png",
+        "backgroundColor": "#F6F8FB"
       },
       "permissions": [
-        "CAMERA"
+        "CAMERA",
+        "RECORD_AUDIO",
+        "READ_EXTERNAL_STORAGE"
       ]
     },
     "web": {
@@ -32,9 +37,26 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow MaAI to access camera for visual eyelid/nail bed anemia screening."
+          "cameraPermission": "Allow MaAI to access camera for visual eyelid/nail bed anemia screening and report OCR."
         }
-      ]
+      ],
+      "expo-sharing",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow MaAI to select a photo of the eyelid, nail bed, or lab report from your gallery when the camera isn't available."
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#F6F8FB"
+        }
+      ],
+      "expo-font",
+      "expo-secure-store"
     ]
   }
 }

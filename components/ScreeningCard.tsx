@@ -9,6 +9,10 @@ interface ScreeningCardProps {
   badgeText?: string;
   iconName: keyof typeof Ionicons.glyphMap;
   isCenterpiece?: boolean;
+  /** Denser tile for a 2-column grid layout — smaller icon, clamped subtitle. */
+  compact?: boolean;
+  accentColor?: string;
+  accentBg?: string;
   onPress: () => void;
 }
 
@@ -18,14 +22,20 @@ export const ScreeningCard: React.FC<ScreeningCardProps> = ({
   badgeText,
   iconName,
   isCenterpiece = false,
+  compact = false,
+  accentColor,
+  accentBg,
   onPress,
 }) => {
+  const iconColor = isCenterpiece ? COLORS.primary : accentColor || COLORS.accent;
+
   return (
     <TouchableOpacity
       activeOpacity={0.85}
       onPress={onPress}
       style={[
         styles.card,
+        compact && styles.compactCard,
         isCenterpiece && styles.centerpieceCard,
       ]}
     >
@@ -34,38 +44,42 @@ export const ScreeningCard: React.FC<ScreeningCardProps> = ({
           style={[
             styles.iconBox,
             isCenterpiece ? styles.centerpieceIconBox : styles.regularIconBox,
+            compact && styles.compactIconBox,
+            !isCenterpiece && accentBg ? { backgroundColor: accentBg } : null,
           ]}
         >
-          <Ionicons
-            name={iconName}
-            size={isCenterpiece ? 28 : 22}
-            color={isCenterpiece ? COLORS.primary : COLORS.accent}
-          />
+          <Ionicons name={iconName} size={isCenterpiece ? 28 : compact ? 18 : 22} color={iconColor} />
         </View>
 
-        {badgeText && (
+        {badgeText && !compact && (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{badgeText}</Text>
           </View>
         )}
       </View>
 
-      <Text style={[styles.title, isCenterpiece && styles.centerpieceTitle]}>
+      <Text
+        style={[styles.title, isCenterpiece && styles.centerpieceTitle, compact && styles.compactTitle]}
+        numberOfLines={compact ? 2 : undefined}
+      >
         {title}
       </Text>
 
-      <Text style={[styles.subtitle, isCenterpiece && styles.centerpieceSubtitle]}>
+      <Text
+        style={[styles.subtitle, isCenterpiece && styles.centerpieceSubtitle, compact && styles.compactSubtitle]}
+        numberOfLines={compact ? 2 : undefined}
+      >
         {subtitle}
       </Text>
 
-      <View style={styles.ctaRow}>
-        <Text style={[styles.ctaText, isCenterpiece && styles.centerpieceCtaText]}>
-          {isCenterpiece ? 'Open Camera Screening' : 'Start Screening'}
+      <View style={[styles.ctaRow, compact && styles.compactCtaRow]}>
+        <Text style={[styles.ctaText, isCenterpiece && styles.centerpieceCtaText, compact && styles.compactCtaText]}>
+          {isCenterpiece ? 'Open Camera Screening' : compact ? 'Start' : 'Start Screening'}
         </Text>
         <Ionicons
           name="arrow-forward"
-          size={18}
-          color={isCenterpiece ? COLORS.primaryDark : COLORS.primary}
+          size={compact ? 14 : 18}
+          color={isCenterpiece ? COLORS.primaryDark : iconColor}
         />
       </View>
     </TouchableOpacity>
@@ -88,6 +102,13 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     padding: SPACING.xl + 4,
   },
+  compactCard: {
+    flexBasis: '48%',
+    flexGrow: 1,
+    padding: SPACING.md,
+    marginBottom: 0,
+    borderRadius: RADIUS.lg,
+  },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -109,6 +130,11 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
+  },
+  compactIconBox: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
   },
   badge: {
     backgroundColor: COLORS.accent,
@@ -133,6 +159,10 @@ const styles = StyleSheet.create({
     fontSize: 22,
     color: COLORS.primaryDark,
   },
+  compactTitle: {
+    fontSize: 13,
+    marginBottom: 3,
+  },
   subtitle: {
     fontSize: 14,
     color: COLORS.textSecondary,
@@ -143,6 +173,11 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     fontSize: 15,
   },
+  compactSubtitle: {
+    fontSize: 11,
+    lineHeight: 15,
+    marginBottom: SPACING.sm,
+  },
   ctaRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -151,10 +186,16 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: COLORS.divider,
   },
+  compactCtaRow: {
+    paddingTop: SPACING.xs,
+  },
   ctaText: {
     fontSize: 15,
     fontWeight: '700',
     color: COLORS.primary,
+  },
+  compactCtaText: {
+    fontSize: 12,
   },
   centerpieceCtaText: {
     color: COLORS.primaryDark,

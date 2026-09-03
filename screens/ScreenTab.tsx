@@ -1,77 +1,86 @@
 import React from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  SafeAreaView,
-  StatusBar,
-} from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { AppHeader } from '../components/AppHeader';
 import { ScreeningCard } from '../components/ScreeningCard';
-import { COLORS, SPACING } from '../constants/theme';
+import { useAppNavigation } from '../navigation/useAppNavigation';
+import { COLORS, SPACING, RADIUS, TYPOGRAPHY } from '../constants/theme';
 
-interface ScreenTabProps {
-  onOpenVisualAnemia: () => void;
-  onOpenPregnancyRisk: () => void;
-  onOpenSymptomScreening: () => void;
-}
+export const ScreenTab: React.FC = () => {
+  const navigation = useAppNavigation();
 
-export const ScreenTab: React.FC<ScreenTabProps> = ({
-  onOpenVisualAnemia,
-  onOpenPregnancyRisk,
-  onOpenSymptomScreening,
-}) => {
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
-      <AppHeader
-        title="Maternal Screening"
-        subtitle="Quick, non-invasive risk screening"
-      />
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <AppHeader title="Screening Hub" subtitle="Choose a screening method for a mother" />
 
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <TouchableOpacity style={styles.infoBanner} onPress={() => navigation.navigate('AiPipelineInfo')}>
+          <View style={styles.infoBannerLeft}>
+            <Ionicons name="information-circle-outline" size={20} color={COLORS.primary} />
+          </View>
+          <View style={{ flex: 1, marginLeft: 10 }}>
+            <Text style={styles.infoBannerTitle}>How MaAI screening works</Text>
+            <Text style={styles.infoBannerSub}>What is automated, what needs your confirmation, and the honest limits</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
+        </TouchableOpacity>
+
         <Text style={styles.introBannerText}>
-          Select a non-invasive screening tool below to record findings and calculate decision-support risk metrics.
+          Every screening method feeds the same risk engine. Results always require your confirmation before they are saved to a mother&apos;s record.
         </Text>
 
-        {/* Centerpiece: Visual Anemia Screening */}
         <ScreeningCard
-          title="Visual Anemia Screening"
-          subtitle="Position inner eyelid (palpebral conjunctiva) or nail bed inside the guide overlay to evaluate visual pallor pattern."
-          badgeText="CAMERA AI PROTOTYPE"
+          title="Vision — Pallor Screening"
+          subtitle="Photograph the inner eyelid or nail bed to check for signs of anemia."
           iconName="camera"
-          isCenterpiece={true}
-          onPress={onOpenVisualAnemia}
+          isCenterpiece
+          onPress={() => navigation.navigate('CameraScreening', {})}
         />
 
-        {/* Option B: Pregnancy Risk Check */}
-        <ScreeningCard
-          title="Pregnancy Risk Check"
-          subtitle="Rule-based calculation combining gestational age, obstetric history, blood pressure, and clinical indicators."
-          badgeText="RULE ENGINE"
-          iconName="calculator-outline"
-          isCenterpiece={false}
-          onPress={onOpenPregnancyRisk}
-        />
-
-        {/* Option C: Symptom Screening */}
-        <ScreeningCard
-          title="Symptom Screening Checklist"
-          subtitle="Visual high-contrast checklist for red-flag maternal danger signs like severe headache, swelling, or reduced movement."
-          badgeText="DANGER SIGNS"
-          iconName="list-outline"
-          isCenterpiece={false}
-          onPress={onOpenSymptomScreening}
-        />
+        <View style={styles.cardGrid}>
+          <ScreeningCard
+            title="Records — Lab Report"
+            subtitle="Scan or enter values from a lab slip. Extracted values need your confirmation."
+            iconName="document-text"
+            accentColor={COLORS.primaryDark}
+            accentBg={COLORS.primaryLight}
+            compact
+            onPress={() => navigation.navigate('ReportScanner', {})}
+          />
+          <ScreeningCard
+            title="Voice Check-in"
+            subtitle="Ask about symptoms in Hindi or English and confirm what's detected."
+            iconName="mic"
+            accentColor={COLORS.voiceAccentDark}
+            accentBg={COLORS.voiceAccentLight}
+            compact
+            onPress={() => navigation.navigate('VoiceCheckIn', {})}
+          />
+          <ScreeningCard
+            title="Risk Assessment"
+            subtitle="Manually enter obstetric history, BP, and Hb for a quick risk check."
+            iconName="calculator-outline"
+            accentColor={COLORS.accentDark}
+            accentBg={COLORS.accentLight}
+            compact
+            onPress={() => navigation.navigate('RiskCheck', {})}
+          />
+          <ScreeningCard
+            title="Danger Signs"
+            subtitle="MoHFW/WHO red-flag checklist: headache, bleeding, convulsions."
+            iconName="alert-circle-outline"
+            accentColor={COLORS.riskHigh}
+            accentBg={COLORS.riskHighLight}
+            compact
+            onPress={() => navigation.navigate('SymptomScreening', {})}
+          />
+        </View>
 
         <View style={styles.disclaimerBox}>
-          <Text style={styles.disclaimerTitle}>IMPORTANT MEDICAL NOTICE</Text>
+          <Text style={styles.disclaimerTitle}>IMPORTANT</Text>
           <Text style={styles.disclaimerText}>
-            MaAI provides decision-support risk screening for frontline health workers. It does NOT provide a final clinical diagnosis. Always confirm findings with laboratory Hb testing and physician evaluation.
+            MaAI provides decision-support risk prioritization. It does not provide a medical diagnosis. Always confirm findings with clinical or laboratory testing.
           </Text>
         </View>
 
@@ -82,38 +91,21 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
+  container: { flex: 1, backgroundColor: COLORS.background },
+  scrollContent: { padding: SPACING.lg },
+  cardGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm, marginBottom: SPACING.lg },
+  infoBanner: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.cardBg, borderRadius: RADIUS.lg,
+    padding: SPACING.md, marginBottom: SPACING.md, borderWidth: 1, borderColor: COLORS.border,
   },
-  scrollContent: {
-    padding: SPACING.lg,
-  },
-  introBannerText: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    marginBottom: SPACING.lg,
-    lineHeight: 20,
-    fontWeight: '500',
-  },
+  infoBannerLeft: { width: 24, alignItems: 'center' },
+  infoBannerTitle: { ...TYPOGRAPHY.bodyStrong, color: COLORS.textPrimary },
+  infoBannerSub: { ...TYPOGRAPHY.caption, color: COLORS.textSecondary, marginTop: 2 },
+  introBannerText: { ...TYPOGRAPHY.caption, color: COLORS.textSecondary, marginBottom: SPACING.md, lineHeight: 18 },
   disclaimerBox: {
-    backgroundColor: COLORS.cardSecondaryBg,
-    borderRadius: SPACING.md,
-    padding: SPACING.md,
-    marginTop: SPACING.sm,
-    borderWidth: 1,
-    borderColor: COLORS.divider,
+    backgroundColor: COLORS.cardSecondaryBg, borderRadius: RADIUS.md, padding: SPACING.md, marginTop: SPACING.sm,
+    borderWidth: 1, borderColor: COLORS.border,
   },
-  disclaimerTitle: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: COLORS.textMuted,
-    letterSpacing: 0.5,
-    marginBottom: 4,
-  },
-  disclaimerText: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    lineHeight: 18,
-  },
+  disclaimerTitle: { ...TYPOGRAPHY.label, color: COLORS.textMuted, marginBottom: 4 },
+  disclaimerText: { ...TYPOGRAPHY.caption, color: COLORS.textSecondary, lineHeight: 18 },
 });

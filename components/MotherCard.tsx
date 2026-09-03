@@ -11,7 +11,7 @@ interface MotherCardProps {
   onScreenPress?: () => void;
 }
 
-export const MotherCard: React.FC<MotherCardProps> = ({
+const MotherCardComponent: React.FC<MotherCardProps> = ({
   mother,
   onPress,
   onScreenPress,
@@ -21,6 +21,8 @@ export const MotherCard: React.FC<MotherCardProps> = ({
       activeOpacity={0.8}
       onPress={onPress}
       style={styles.card}
+      accessibilityRole="button"
+      accessibilityLabel={`${mother.name}, ${mother.riskLevel} risk, ${mother.gestationalAgeWeeks} weeks pregnant`}
     >
       <View style={styles.topRow}>
         <View style={styles.nameSection}>
@@ -78,6 +80,8 @@ export const MotherCard: React.FC<MotherCardProps> = ({
     </TouchableOpacity>
   );
 };
+
+export const MotherCard = React.memo(MotherCardComponent);
 
 const styles = StyleSheet.create({
   card: {
