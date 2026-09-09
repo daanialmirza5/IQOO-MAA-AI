@@ -48,6 +48,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "test": "jest",
+    "test:sync": "npx tsx --test services/sync/__tests__/**/*.test.ts",
     "test:watch": "jest --watch",
     "lint": "eslint ."
   },
