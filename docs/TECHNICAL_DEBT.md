@@ -1,7 +1,6 @@
 # MaAI (IQOO-MAA-AI) — Technical Debt & Architectural Audit
 
 **Repository**: `IQOO-MAA-AI`  
-**Status**: Tier 2 Supporting
 
 ## Prioritized Debt Items
 - **[P1 — High] SQLCipher SQLite Encryption**: Upgrade standard expo-sqlite to SQLCipher for full hardware-backed database encryption at rest.
